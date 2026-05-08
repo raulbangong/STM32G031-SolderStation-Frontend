@@ -1,0 +1,30 @@
+name: STM32 Build CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install ARM Toolchain
+        uses: gcc-arm-embedded/setup-arm-embedded-gcc@v1
+        with:
+          arm-embedded-gcc-version: '10.3-2021.10'
+
+      - name: Compile Project
+        run: |
+          cd blinky
+          make
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: SolderStation-Firmware
+          path: |
+            blinky/*.bin
+            blinky/*.hex
+            blinky/*.elf

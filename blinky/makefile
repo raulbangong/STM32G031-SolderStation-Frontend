@@ -1,5 +1,5 @@
 TARGET = blinky
-SRCS = main.c
+SRCS = main.c st7735.c fonts.c
 
 LINKER_SCRIPT = ../linker/STM32G031K8Tx_FLASH.ld
 
