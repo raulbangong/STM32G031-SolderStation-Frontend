@@ -2,9 +2,42 @@
 #ifndef __ST7735_H__
 #define __ST7735_H__
 
+#include "stm32g0xx.h"  // 引入官方底层寄存器头文件
 #include "fonts.h"
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
+// ==========================================
+// 1. 硬件外设映射 (纯裸机版)
+// ==========================================
+#define ST7735_SPI_PORT SPI1
+
+// 这里根据你之前的电路图设定：PB4(CS), PB7(RES), PB6(DC)
+#define ST7735_CS_Pin        (1U << 4)
+#define ST7735_CS_GPIO_Port  GPIOB
+
+#define ST7735_RES_Pin       (1U << 7)
+#define ST7735_RES_GPIO_Port GPIOB
+
+#define ST7735_DC_Pin        (1U << 6)
+#define ST7735_DC_GPIO_Port  GPIOB
+
+// ==========================================
+// 2. 屏幕参数定义 (专为 160x80 电子烟屏幕定制)
+// ==========================================
+// 这几个宏决定了你在 st7735.c 里的初始化逻辑和显示方向
+#define ST7735_IS_160X80 1
+
+// 下面这组参数，让你默认把长边作为水平方向 (即 160宽 x 80高)
+#define ST7735_WIDTH  160
+#define ST7735_HEIGHT 80
+#define ST7735_XSTART 1
+#define ST7735_YSTART 26
+
+// ==========================================
+// 3. 屏幕底层命令 (保持不变)
+// ==========================================
 #define ST7735_MADCTL_MY  0x80
 #define ST7735_MADCTL_MX  0x40
 #define ST7735_MADCTL_MV  0x20
@@ -13,166 +46,8 @@
 #define ST7735_MADCTL_BGR 0x08
 #define ST7735_MADCTL_MH  0x04
 
-/*** Redefine if necessary ***/
-#define ST7735_SPI_PORT hspi1
-extern SPI_HandleTypeDef ST7735_SPI_PORT;
-
-#define ST7735_RES_Pin       GPIO_PIN_7
-#define ST7735_RES_GPIO_Port GPIOC
-#define ST7735_CS_Pin        GPIO_PIN_6
-#define ST7735_CS_GPIO_Port  GPIOB
-#define ST7735_DC_Pin        GPIO_PIN_9
-#define ST7735_DC_GPIO_Port  GPIOA
-
-// AliExpress/eBay 1.8" display, default orientation
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 160
-#define ST7735_XSTART 0
-#define ST7735_YSTART 0
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MY)
-*/
-
-// AliExpress/eBay 1.8" display, rotate right
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  160
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 0
-#define ST7735_YSTART 0
-#define ST7735_ROTATION (ST7735_MADCTL_MY | ST7735_MADCTL_MV)
-*/
-
-// AliExpress/eBay 1.8" display, rotate left
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  160
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 0
-#define ST7735_YSTART 0
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MV)
-*/
-
-// AliExpress/eBay 1.8" display, upside down
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 160
-#define ST7735_XSTART 0
-#define ST7735_YSTART 0
-#define ST7735_ROTATION (0)
-*/
-
-// WaveShare ST7735S-based 1.8" display, default orientation
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 160
-#define ST7735_XSTART 2
-#define ST7735_YSTART 1
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MY | ST7735_MADCTL_RGB)
-*/
-
-// WaveShare ST7735S-based 1.8" display, rotate right
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  160
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 1
-#define ST7735_YSTART 2
-#define ST7735_ROTATION (ST7735_MADCTL_MY | ST7735_MADCTL_MV | ST7735_MADCTL_RGB)
-*/
-
-// WaveShare ST7735S-based 1.8" display, rotate left
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  160
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 1
-#define ST7735_YSTART 2
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MV | ST7735_MADCTL_RGB)
-*/
-
-// WaveShare ST7735S-based 1.8" display, upside down
-/*
-#define ST7735_IS_160X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 160
-#define ST7735_XSTART 2
-#define ST7735_YSTART 1
-#define ST7735_ROTATION (ST7735_MADCTL_RGB)
-*/
-
-// 1.44" display, default orientation
-#define ST7735_IS_128X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 2
-#define ST7735_YSTART 3
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MY | ST7735_MADCTL_BGR)
-
-// 1.44" display, rotate right
-/*
-#define ST7735_IS_128X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 3
-#define ST7735_YSTART 2
+// 默认的显示旋转方向宏定义 (针对 160x80 长条屏左转/右转)
 #define ST7735_ROTATION (ST7735_MADCTL_MY | ST7735_MADCTL_MV | ST7735_MADCTL_BGR)
-*/
-
-// 1.44" display, rotate left
-/*
-#define ST7735_IS_128X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 1
-#define ST7735_YSTART 2
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MV | ST7735_MADCTL_BGR)
-*/
-
-// 1.44" display, upside down
-/*
-#define ST7735_IS_128X128 1
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 128
-#define ST7735_XSTART 2
-#define ST7735_YSTART 1
-#define ST7735_ROTATION (ST7735_MADCTL_BGR)
-*/
-
-// mini 160x80 display (it's unlikely you want the default orientation)
-/*
-#define ST7735_IS_160X80 1
-#define ST7735_XSTART 26
-#define ST7735_YSTART 1
-#define ST7735_WIDTH  80
-#define ST7735_HEIGHT 160 
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MY | ST7735_MADCTL_BGR)
-*/
-
-// mini 160x80, rotate left
-/*
-#define ST7735_IS_160X80 1
-#define ST7735_XSTART 1
-#define ST7735_YSTART 26
-#define ST7735_WIDTH  160
-#define ST7735_HEIGHT 80
-#define ST7735_ROTATION (ST7735_MADCTL_MX | ST7735_MADCTL_MV | ST7735_MADCTL_BGR)
-*/
-
-// mini 160x80, rotate right 
-/*
-#define ST7735_IS_160X80 1
-#define ST7735_XSTART 1
-#define ST7735_YSTART 26
-#define ST7735_WIDTH  160
-#define ST7735_HEIGHT 80
-#define ST7735_ROTATION (ST7735_MADCTL_MY | ST7735_MADCTL_MV | ST7735_MADCTL_BGR)
-*/
-
-/****************************/
 
 #define ST7735_NOP     0x00
 #define ST7735_SWRESET 0x01
@@ -221,32 +96,37 @@ extern SPI_HandleTypeDef ST7735_SPI_PORT;
 #define ST7735_GMCTRP1 0xE0
 #define ST7735_GMCTRN1 0xE1
 
-// Color definitions
-#define	ST7735_BLACK   0x0000
-#define	ST7735_BLUE    0x001F
-#define	ST7735_RED     0xF800
-#define	ST7735_GREEN   0x07E0
+// ==========================================
+// 4. 常用颜色定义 (RGB565格式)
+// ==========================================
+#define ST7735_BLACK   0x0000
+#define ST7735_BLUE    0x001F
+#define ST7735_RED     0xF800
+#define ST7735_GREEN   0x07E0
 #define ST7735_CYAN    0x07FF
 #define ST7735_MAGENTA 0xF81F
 #define ST7735_YELLOW  0xFFE0
 #define ST7735_WHITE   0xFFFF
+#define ST7735_GRAY    0x8410
 #define ST7735_COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
 
 typedef enum {
-	GAMMA_10 = 0x01,
-	GAMMA_25 = 0x02,
-	GAMMA_22 = 0x04,
-	GAMMA_18 = 0x08
+    GAMMA_10 = 0x01,
+    GAMMA_25 = 0x02,
+    GAMMA_22 = 0x04,
+    GAMMA_18 = 0x08
 } GammaDef;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// call before initializing any SPI devices
-void ST7735_Unselect();
-
+// ==========================================
+// 5. 核心 API 声明
+// ==========================================
+void ST7735_Unselect(void);
 void ST7735_Init(void);
+void ST7735_SetRotation(uint8_t m); // 如果你的 st7735.c 里有这个函数的话
 void ST7735_DrawPixel(uint16_t x, uint16_t y, uint16_t color);
 void ST7735_WriteString(uint16_t x, uint16_t y, const char* str, FontDef font, uint16_t color, uint16_t bgcolor);
 void ST7735_FillRectangle(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);

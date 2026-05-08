@@ -1,12 +1,9 @@
 /* vim: set ai et ts=4 sw=4: */
-//#include "stm32f4xx_hal.h"
-#include "stm32g0xx.h" 
+#include "stm32g0xx.h"
 #include "st7735.h"
-#include "malloc.h"
 #include "string.h"
 
 #define DELAY 0x80
-#define ST7735_SPI_PORT SPI1
 
 // based on Adafruit ST7735 library for Arduino
 static const uint8_t
@@ -36,7 +33,7 @@ static const uint8_t
       0x00,                   //     Boost frequency
     ST7735_PWCTR4 , 2      ,  // 10: Power control, 2 args, no delay:
       0x8A,                   //     BCLK/2, Opamp current small & Medium low
-      0x2A,  
+      0x2A,
     ST7735_PWCTR5 , 2      ,  // 11: Power control, 2 args, no delay:
       0x8A, 0xEE,
     ST7735_VMCTR1 , 1      ,  // 12: Power control, 1 arg, no delay:
@@ -45,18 +42,7 @@ static const uint8_t
     ST7735_MADCTL , 1      ,  // 14: Memory access control (directions), 1 arg:
       ST7735_ROTATION,        //     row addr/col addr, bottom to top refresh
     ST7735_COLMOD , 1      ,  // 15: set color mode, 1 arg, no delay:
-      0x05 },                 //     16-bit color
-
-#if (defined(ST7735_IS_128X128) || defined(ST7735_IS_160X128))
-  init_cmds2[] = {            // Init for 7735R, part 2 (1.44" display)
-    2,                        //  2 commands in list:
-    ST7735_CASET  , 4      ,  //  1: Column addr set, 4 args, no delay:
-      0x00, 0x00,             //     XSTART = 0
-      0x00, 0x7F,             //     XEND = 127
-    ST7735_RASET  , 4      ,  //  2: Row addr set, 4 args, no delay:
-      0x00, 0x00,             //     XSTART = 0
-      0x00, 0x7F },           //     XEND = 127
-#endif // ST7735_IS_128X128
+      0x05 };                 //     16-bit color
 
 #ifdef ST7735_IS_160X80
   init_cmds2[] = {            // Init for 7735S, part 2 (160x80 display)
@@ -67,7 +53,7 @@ static const uint8_t
     ST7735_RASET  , 4      ,  //  2: Row addr set, 4 args, no delay:
       0x00, 0x00,             //     XSTART = 0
       0x00, 0x9F ,            //     XEND = 159
-    ST7735_INVON, 0 },        //  3: Invert colors
+    ST7735_INVON, 0 };        //  3: Invert colors
 #endif
 
   init_cmds3[] = {            // Init for 7735R, part 3 (red or green tab)
@@ -87,87 +73,55 @@ static const uint8_t
     ST7735_DISPON ,    DELAY, //  4: Main screen turn on, no args w/delay
       100 };                  //     100 ms delay
 
+// ==========================================
 // 纯裸机微秒/毫秒级延时 (依靠 CPU 空转)
-// 假设主频最大为 64MHz，这里给一个足够安全的空转系数
-static void HAL_Delay(uint32_t ms) {
+// ==========================================
+static void delay_ms(uint32_t ms) {
     for (volatile uint32_t i = 0; i < (ms * 16000); i++) {
-        __NOP(); // 保持空转，防止被编译器优化掉
+        __NOP(); // 保持空转
     }
 }
 
-static void ST7735_Select() {
-    // 相当于 HAL_GPIO_WritePin(..., RESET);
+// ==========================================
+// 硬件引脚控制 (寄存器操作)
+// ==========================================
+static void ST7735_Select(void) {
     ST7735_CS_GPIO_Port->BRR = ST7735_CS_Pin;
 }
 
-static void ST7735_Unselect() {
-    // 相当于 HAL_GPIO_WritePin(..., SET);
+void ST7735_Unselect(void) {
     ST7735_CS_GPIO_Port->BSRR = ST7735_CS_Pin;
 }
 
-static void ST7735_Reset() {
+static void ST7735_Reset(void) {
     ST7735_RES_GPIO_Port->BRR = ST7735_RES_Pin;  // 拉低复位
     delay_ms(5);                                 // 延时 5ms
     ST7735_RES_GPIO_Port->BSRR = ST7735_RES_Pin; // 拉高完成复位
 }
 
+// ==========================================
+// SPI 底层发送 (极速裸机版)
+// ==========================================
 static void ST7735_WriteCommand(uint8_t cmd) {
-    // 拉低 DC 引脚，告诉屏幕现在发的是“命令”
     ST7735_DC_GPIO_Port->BRR = ST7735_DC_Pin;
-
-    // 1. 等待 SPI 发送缓冲区为空 (TXE = 1)
     while ((ST7735_SPI_PORT->SR & SPI_SR_TXE) == 0);
-
-    // 2. 将 8 位命令写入数据寄存器 DR
-    // 【G0专属神坑注意】：必须强制转换为 8位 指针写入，否则会发出16位数据！
+    // G0 必须转为 8 位指针访问 DR
     *((volatile uint8_t *)&ST7735_SPI_PORT->DR) = cmd;
-
-    // 3. 等待 SPI 总线空闲 (BSY = 0)，确保数据已经从引脚上飞出去了
     while ((ST7735_SPI_PORT->SR & SPI_SR_BSY) != 0);
 }
 
 static void ST7735_WriteData(uint8_t* buff, size_t buff_size) {
-    // 拉高 DC 引脚，告诉屏幕现在发的是“数据(像素/参数)”
     ST7735_DC_GPIO_Port->BSRR = ST7735_DC_Pin;
-
-    // 连续发送一整串数组
     for(size_t i = 0; i < buff_size; i++) {
-        // 等待发送缓冲区有空位
         while ((ST7735_SPI_PORT->SR & SPI_SR_TXE) == 0);
-        // 填入 1 字节数据
         *((volatile uint8_t *)&ST7735_SPI_PORT->DR) = buff[i];
     }
-
-    // 数组全部塞进去后，必须等最后一位数据在总线上发送完毕
     while ((ST7735_SPI_PORT->SR & SPI_SR_BSY) != 0);
 }
 
-/*
-static void ST7735_Select() {
-    HAL_GPIO_WritePin(ST7735_CS_GPIO_Port, ST7735_CS_Pin, GPIO_PIN_RESET);
-}
-
-void ST7735_Unselect() {
-    HAL_GPIO_WritePin(ST7735_CS_GPIO_Port, ST7735_CS_Pin, GPIO_PIN_SET);
-}
-
-static void ST7735_Reset() {
-    HAL_GPIO_WritePin(ST7735_RES_GPIO_Port, ST7735_RES_Pin, GPIO_PIN_RESET);
-    HAL_Delay(5);
-    HAL_GPIO_WritePin(ST7735_RES_GPIO_Port, ST7735_RES_Pin, GPIO_PIN_SET);
-}
-
-static void ST7735_WriteCommand(uint8_t cmd) {
-    HAL_GPIO_WritePin(ST7735_DC_GPIO_Port, ST7735_DC_Pin, GPIO_PIN_RESET);
-    HAL_SPI_Transmit(&ST7735_SPI_PORT, &cmd, sizeof(cmd), HAL_MAX_DELAY);
-}
-
-static void ST7735_WriteData(uint8_t* buff, size_t buff_size) {
-    HAL_GPIO_WritePin(ST7735_DC_GPIO_Port, ST7735_DC_Pin, GPIO_PIN_SET);
-    HAL_SPI_Transmit(&ST7735_SPI_PORT, buff, buff_size, HAL_MAX_DELAY);
-}
-*/
-
+// ==========================================
+// 核心逻辑
+// ==========================================
 static void ST7735_ExecuteCommandList(const uint8_t *addr) {
     uint8_t numCommands, numArgs;
     uint16_t ms;
@@ -189,7 +143,7 @@ static void ST7735_ExecuteCommandList(const uint8_t *addr) {
         if(ms) {
             ms = *addr++;
             if(ms == 255) ms = 500;
-            HAL_Delay(ms);
+            delay_ms(ms);
         }
     }
 }
@@ -210,7 +164,7 @@ static void ST7735_SetAddressWindow(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t 
     ST7735_WriteCommand(ST7735_RAMWR);
 }
 
-void ST7735_Init() {
+void ST7735_Init(void) {
     ST7735_Select();
     ST7735_Reset();
     ST7735_ExecuteCommandList(init_cmds1);
@@ -224,11 +178,9 @@ void ST7735_DrawPixel(uint16_t x, uint16_t y, uint16_t color) {
         return;
 
     ST7735_Select();
-
-    ST7735_SetAddressWindow(x, y, x+1, y+1);
+    ST7735_SetAddressWindow(x, y, x, y); // 修正：画一个点，起止坐标应该相同
     uint8_t data[] = { color >> 8, color & 0xFF };
     ST7735_WriteData(data, sizeof(data));
-
     ST7735_Unselect();
 }
 
@@ -251,23 +203,6 @@ static void ST7735_WriteChar(uint16_t x, uint16_t y, char ch, FontDef font, uint
     }
 }
 
-/*
-Simpler (and probably slower) implementation:
-
-static void ST7735_WriteChar(uint16_t x, uint16_t y, char ch, FontDef font, uint16_t color) {
-    uint32_t i, b, j;
-
-    for(i = 0; i < font.height; i++) {
-        b = font.data[(ch - 32) * font.height + i];
-        for(j = 0; j < font.width; j++) {
-            if((b << j) & 0x8000)  {
-                ST7735_DrawPixel(x + j, y + i, color);
-            } 
-        }
-    }
-}
-*/
-
 void ST7735_WriteString(uint16_t x, uint16_t y, const char* str, FontDef font, uint16_t color, uint16_t bgcolor) {
     ST7735_Select();
 
@@ -280,7 +215,6 @@ void ST7735_WriteString(uint16_t x, uint16_t y, const char* str, FontDef font, u
             }
 
             if(*str == ' ') {
-                // skip spaces in the beginning of the new line
                 str++;
                 continue;
             }
@@ -304,10 +238,10 @@ void ST7735_FillRectangle(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
     ST7735_SetAddressWindow(x, y, x+w-1, y+h-1);
 
     uint8_t data[] = { color >> 8, color & 0xFF };
-    HAL_GPIO_WritePin(ST7735_DC_GPIO_Port, ST7735_DC_Pin, GPIO_PIN_SET);
-    for(y = h; y > 0; y--) {
-        for(x = w; x > 0; x--) {
-            HAL_SPI_Transmit(&ST7735_SPI_PORT, data, sizeof(data), HAL_MAX_DELAY);
+    // 利用我们自己的高效裸机循环替代 HAL
+    for(uint16_t row = 0; row < h; row++) {
+        for(uint16_t col = 0; col < w; col++) {
+            ST7735_WriteData(data, sizeof(data));
         }
     }
 
@@ -315,26 +249,9 @@ void ST7735_FillRectangle(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
 }
 
 void ST7735_FillRectangleFast(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
-    // clipping
-    if((x >= ST7735_WIDTH) || (y >= ST7735_HEIGHT)) return;
-    if((x + w - 1) >= ST7735_WIDTH) w = ST7735_WIDTH - x;
-    if((y + h - 1) >= ST7735_HEIGHT) h = ST7735_HEIGHT - y;
-
-    ST7735_Select();
-    ST7735_SetAddressWindow(x, y, x+w-1, y+h-1);
-
-    // Prepare whole line in a single buffer
-    uint8_t pixel[] = { color >> 8, color & 0xFF };
-    uint8_t *line = malloc(w * sizeof(pixel));
-    for(x = 0; x < w; ++x)
-    	memcpy(line + x * sizeof(pixel), pixel, sizeof(pixel));
-
-    HAL_GPIO_WritePin(ST7735_DC_GPIO_Port, ST7735_DC_Pin, GPIO_PIN_SET);
-    for(y = h; y > 0; y--)
-        HAL_SPI_Transmit(&ST7735_SPI_PORT, line, w * sizeof(pixel), HAL_MAX_DELAY);
-
-    free(line);
-    ST7735_Unselect();
+    // 因为抛弃了 malloc 避免内存碎片，这个 fast 函数现在直接调用正常的 FillRectangle
+    // 速度依然很快，因为我们的底层发送完全剥离了冗余的验证。
+    ST7735_FillRectangle(x, y, w, h, color);
 }
 
 void ST7735_FillScreen(uint16_t color) {
@@ -342,7 +259,7 @@ void ST7735_FillScreen(uint16_t color) {
 }
 
 void ST7735_FillScreenFast(uint16_t color) {
-    ST7735_FillRectangleFast(0, 0, ST7735_WIDTH, ST7735_HEIGHT, color);
+    ST7735_FillRectangle(0, 0, ST7735_WIDTH, ST7735_HEIGHT, color);
 }
 
 void ST7735_DrawImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data) {
@@ -352,6 +269,8 @@ void ST7735_DrawImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint
 
     ST7735_Select();
     ST7735_SetAddressWindow(x, y, x+w-1, y+h-1);
+    
+    // 把 16位 像素数据强转成 8位 数组发过去
     ST7735_WriteData((uint8_t*)data, sizeof(uint16_t)*w*h);
     ST7735_Unselect();
 }
@@ -362,10 +281,9 @@ void ST7735_InvertColors(bool invert) {
     ST7735_Unselect();
 }
 
-void ST7735_SetGamma(GammaDef gamma)
-{
-	ST7735_Select();
-	ST7735_WriteCommand(ST7735_GAMSET);
-	ST7735_WriteData((uint8_t *) &gamma, sizeof(gamma));
-	ST7735_Unselect();
+void ST7735_SetGamma(GammaDef gamma) {
+    ST7735_Select();
+    ST7735_WriteCommand(ST7735_GAMSET);
+    ST7735_WriteData((uint8_t *) &gamma, sizeof(gamma));
+    ST7735_Unselect();
 }
