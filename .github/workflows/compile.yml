@@ -1,30 +1,39 @@
-name: STM32 Build CI
+name: STM32 Auto Build & Release
 
-on: [push, pull_request]
+# 触发条件：只有推送 v 开头的 tag 时（例如 v1.0），才会触发 Release 编译
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 极其重要：必须赋予 GitHub Actions 写入 Release 的权限，否则会报 403 错误
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install ARM Toolchain
-        uses: gcc-arm-embedded/setup-arm-embedded-gcc@v1
-        with:
-          arm-embedded-gcc-version: '10.3-2021.10'
+      - name: Install ARM Toolchain (原生 apt 安装，最稳)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi make
 
-      - name: Compile Project
+      - name: Compile Firmware
         run: |
           cd blinky
-          make
+          make -j4
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+      - name: Create Release and Upload Artifacts
+        uses: softprops/action-gh-release@v2
         with:
-          name: SolderStation-Firmware
-          path: |
-            blinky/*.bin
-            blinky/*.hex
-            blinky/*.elf
+          # 注意看你本地编译的日志，固件是生成在 Debug 目录下的！
+          files: |
+            blinky/Debug/blinky.bin
+            blinky/Debug/blinky.hex
+            blinky/Debug/blinky.elf
+          generate_release_notes: true
